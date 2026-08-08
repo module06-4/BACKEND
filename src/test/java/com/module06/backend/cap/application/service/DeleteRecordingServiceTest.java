@@ -233,6 +233,11 @@ class DeleteRecordingServiceTest {
             public void deleteRecording(String s3Key) {
                 storageDeleted[0] = true;
             }
+
+            @Override
+            public boolean objectMatches(String s3Key, long expectedSizeBytes) {
+                throw new AssertionError("삭제 경로에서 objectMatches는 호출되면 안 됩니다.");
+            }
         };
         // 삭제 경로(회사 스코프만 씀)는 프로젝트 멤버 판정을 타지 않으므로 항상 false인 스텁으로 충분하다.
         ProjectTeamReferenceRepository projectTeamRef = (projectId, teamId) -> false;

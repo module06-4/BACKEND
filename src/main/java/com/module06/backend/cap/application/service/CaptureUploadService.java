@@ -9,10 +9,8 @@ import com.module06.backend.cap.application.usecase.CompletePartUploadUseCase;
 import com.module06.backend.cap.application.usecase.IssuePartUploadUrlsUseCase;
 import com.module06.backend.cap.domain.exception.CapErrorCode;
 import com.module06.backend.cap.domain.model.CaptureUploadState;
-import com.module06.backend.cap.domain.model.RecordingPart;
 import com.module06.backend.cap.domain.repository.CaptureUploadStateRepository;
 import com.module06.backend.cap.domain.repository.MeetingReferenceRepository;
-import com.module06.backend.cap.domain.repository.RecordingPartRepository;
 import com.module06.backend.global.exception.BusinessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,32 +21,36 @@ import java.util.List;
 // presign(#4)+complete(#7)의 실제 로직을 담당하는 서비스. UseCase 인터페이스의 진짜 구현체 —
 // 회의 존재 확인, 녹음자 배정/검증, 청크 저장, S3 키 조립, 하트비트 갱신을 전부 여기서 조율한다.
 @Service
-@Transactional
 public class CaptureUploadService implements IssuePartUploadUrlsUseCase, CompletePartUploadUseCase {
 
     private final MeetingReferenceRepository meetingReferenceRepository;
     private final CapMeetingAccessGuard accessGuard;
     private final CaptureUploadStateRepository captureUploadStateRepository;
-    private final RecordingPartRepository recordingPartRepository;
     private final CapObjectStoragePort capObjectStoragePort;
     private final CaptureHeartbeatPort captureHeartbeatPort;
+    // completePartUpload의 실제 DB 쓰기(청크·상태 저장)만 짧은 트랜잭션으로 묶는 별도 협력자
+    // (CodeRabbit 지적 — S3 HEAD 호출을 트랜잭션 밖에 두려고 분리). CaptureUploadService 자신을
+    // this.xxx()로 불렀다면 @Transactional이 프록시를 못 거쳐 안 걸렸을 것이라, 별도 빈으로 뽑았다.
+    private final CompletePartUploadWriter completePartUploadWriter;
 
     public CaptureUploadService(MeetingReferenceRepository meetingReferenceRepository,
                                 CapMeetingAccessGuard accessGuard,
                                 CaptureUploadStateRepository captureUploadStateRepository,
-                                RecordingPartRepository recordingPartRepository,
                                 CapObjectStoragePort capObjectStoragePort,
-                                CaptureHeartbeatPort captureHeartbeatPort) {
+                                CaptureHeartbeatPort captureHeartbeatPort,
+                                CompletePartUploadWriter completePartUploadWriter) {
         this.meetingReferenceRepository = meetingReferenceRepository;
         this.accessGuard = accessGuard;
         this.captureUploadStateRepository = captureUploadStateRepository;
-        this.recordingPartRepository = recordingPartRepository;
         this.capObjectStoragePort = capObjectStoragePort;
         this.captureHeartbeatPort = captureHeartbeatPort;
+        this.completePartUploadWriter = completePartUploadWriter;
     }
 
     // 회의 존재 확인 → 참석자 확인 → 녹음자 배정/검증 → 하트비트 갱신 → presigned URL count개 발급
+    // (presign 자체는 로컬 서명 계산이라 네트워크 호출이 없다 — 트랜잭션 안에 있어도 커넥션을 오래 붙들지 않는다.)
     @Override
+    @Transactional
     public Result issuePartUploadUrls(IssuePartUploadUrlsCommand command) {
         Long companyId = meetingReferenceRepository.findCompanyId(command.meetingId())
                 .orElseThrow(() -> new BusinessException(CapErrorCode.CAP_MEETING_NOT_FOUND));
@@ -82,7 +84,13 @@ public class CaptureUploadService implements IssuePartUploadUrlsUseCase, Complet
         return new Result(saved.getSegmentSeq(), parts);
     }
 
-    // 회의 존재 확인 → 참석자 확인 → 녹음자 검증 → 세그먼트/키 검증 → 청크 저장(멱등) → lastSeq/하트비트 갱신
+    // 회의 존재 확인 → 참석자 확인 → 녹음자 검증 → 세그먼트/키 검증 → S3 HEAD 확인 → 청크 저장(멱등)
+    // → lastSeq/하트비트 갱신
+    //
+    // ⚠️ 이 메서드 자체는 @Transactional이 아니다(CodeRabbit 지적) — S3 objectMatches()가 동기
+    // 네트워크 호출이라, 트랜잭션(=DB 커넥션 점유) 안에서 부르면 S3 지연·재시도 동안 커넥션을 오래
+    // 붙든다. 읽기(findCompanyId/findByMeetingId)는 각자 자동 커밋되는 단건 조회라 트랜잭션이 굳이
+    // 필요 없고, 실제 쓰기(청크·상태 저장)만 CompletePartUploadWriter로 좁혀서 짧게 묶는다.
     @Override
     public void completePartUpload(CompletePartUploadCommand command) {
         Long companyId = meetingReferenceRepository.findCompanyId(command.meetingId())
@@ -96,6 +104,7 @@ public class CaptureUploadService implements IssuePartUploadUrlsUseCase, Complet
                 .orElseThrow(() -> new BusinessException(CapErrorCode.CAP_NOT_CURRENT_RECORDER));
 
         // 녹음자 검증(아니면 여기서 CAP_NOT_CURRENT_RECORDER) 먼저, 그 다음에야 저장을 시도한다.
+        // (아직 DB에 반영 안 된 순수 인메모리 변경 — 아래서 실패하면 저장 자체가 안 되니 그냥 버려진다.)
         state.recordUpload(command.callerId(), command.seq());
 
         // 요청 본문의 segmentSeq/s3Key를 그대로 믿지 않는다(IDOR 방지) — 현재 세그먼트와 일치해야 하고,
@@ -111,18 +120,16 @@ public class CaptureUploadService implements IssuePartUploadUrlsUseCase, Complet
             throw new BusinessException(CapErrorCode.CAP_PART_KEY_MISMATCH);
         }
 
-        // TODO(실 S3 어댑터 배선 후): 저장 전 CapObjectStoragePort로 S3 HEAD 조회 — 객체 실제 존재 확인 +
-        //   실제 크기/콘텐츠타입을 신뢰(현재는 요청 본문 sizeBytes를 그대로 기록). 지금은 스토리지가 Stub이라
-        //   HEAD를 붙여도 가짜로 통과하므로, 실 어댑터가 생길 때 함께 반영한다(그래야 없는 객체를 UPLOADED로
-        //   기록해 조립이 깨지는 걸 막는다).
-        // recording_part.content_type(NOT NULL)을 채운다 — 확장자에서 역산(webm→audio/webm, mp4→audio/mp4).
-        RecordingPart part = RecordingPart.create(command.meetingId(), state.getSegmentSeq(), command.seq(),
-                expectedKey, contentTypeForExtension(extension), command.sizeBytes(), command.callerId());
-        // UNIQUE(meeting_id, segment_seq, seq) 위반 시 어댑터가 CAP_PART_ALREADY_REGISTERED(409)로 변환.
-        recordingPartRepository.save(part);
+        // 요청 본문 sizeBytes를 그대로 믿지 않는다(#155) — 실제로 그 크기로 업로드가 됐는지 S3
+        // HEAD로 확인한다(트랜잭션 밖, DB 커넥션 미점유). 없거나 크기가 다르면 클라이언트가 업로드도
+        // 안 하고(또는 다른 크기로) 완료를 통보한 것이므로, 없는 객체를 UPLOADED로 기록해 조립이
+        // 깨지는 것을 막는다.
+        if (!capObjectStoragePort.objectMatches(command.s3Key(), command.sizeBytes())) {
+            throw new BusinessException(CapErrorCode.CAP_PART_NOT_UPLOADED);
+        }
 
-        captureUploadStateRepository.save(state);
-        captureHeartbeatPort.refresh(command.meetingId());
+        // recording_part.content_type(NOT NULL)을 채운다 — 확장자에서 역산(webm→audio/webm, mp4→audio/mp4).
+        completePartUploadWriter.write(state, expectedKey, contentTypeForExtension(extension), command);
 
         // TODO: 10분(40청크) 누적 시 블록 조립 베스트에포트 트리거.
         // 이태연 capture/STT 도메인(develop의 V5.x·stt_block)과 연동해야 하나, 조립 트리거 배선은

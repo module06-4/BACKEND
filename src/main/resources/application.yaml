@@ -103,6 +103,15 @@ ai:
   connect-timeout: 5s
   read-timeout: 3m
 
+# ── CAP 녹음 오브젝트 스토리지(S3) ──
+# 리전은 하드코딩(CapS3ClientConfig) — 이 프로젝트가 쓰는 유일한 리전이고, infra/deploy.sh의
+# AWS CLI 호출도 이미 ap-northeast-2를 하드코딩해서 쓴다(SSM 파라미터를 하나 더 늘리지 않는다).
+# 자격증명은 EC2 인스턴스 IAM 역할(DefaultCredentialsProvider)로 받는다 — 액세스키를 SSM에
+# 따로 안 둔다. prod 프로파일에서만 빈이 뜨므로 로컬/테스트는 이 값이 없어도 부팅된다.
+cap:
+  s3:
+    bucket: ${S3_BUCKET:}
+
 # Prometheus 설정
 management:
   endpoints:

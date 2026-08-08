@@ -17,8 +17,17 @@ repositories {
 	mavenCentral()
 }
 
+// AWS SDK v2 — S3 프로덕션 어댑터(CapS3ObjectStorageAdapter, presigned PUT/GET) 버전 관리용.
+// 팀 내 첫 AWS SDK 도입이라 기존에 맞출 버전 고정이 없어 새로 잡는다(2026-08 기준 최신 안정판).
+// ⚠️ s3-presigner는 더 이상 별도 아티팩트가 아니다 — S3Presigner가 s3 모듈 안에 번들돼 있다
+//    (software.amazon.awssdk.services.s3.presigner.*, 2.34.0 jar 안에서 실제 확인).
+def awsSdkVersion = '2.34.0'
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+	// S3 presigned URL 발급(PUT/GET) + 삭제. S3Presigner도 이 안에 포함돼 있다.
+	implementation "software.amazon.awssdk:s3:${awsSdkVersion}"
 
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'

@@ -47,7 +47,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("presign: 회의가 없으면 CAP-002로 거절한다")
     void issue_rejectsWhenMeetingMissing() {
-        CaptureUploadService service = service(Optional.empty(), true, null, true);
+        CaptureUploadService service = service(Optional.empty(), true, null, true, true);
 
         assertErrorCode(() -> service.issuePartUploadUrls(issueCmd(2)), "CAP-002");
     }
@@ -56,7 +56,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("presign: 참석자가 아니면 CAP-010으로 거절한다")
     void issue_rejectsNonAttendee() {
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), false, null, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), false, null, true, true);
 
         assertErrorCode(() -> service.issuePartUploadUrls(issueCmd(2)), "CAP-010");
     }
@@ -65,7 +65,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("presign: 첫 호출이면 녹음자로 배정되고 count개 URL을 발급한다")
     void issue_firstCallAssignsRecorderAndIssuesUrls() {
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, null, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, null, true, true);
 
         IssuePartUploadUrlsUseCase.Result result = service.issuePartUploadUrls(issueCmd(3));
 
@@ -82,7 +82,7 @@ class CaptureUploadServiceTest {
     @DisplayName("presign: 현재 녹음자 본인의 재호출은 세그먼트를 유지한다")
     void issue_sameRecorderKeepsSegment() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, CALLER_ID);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         IssuePartUploadUrlsUseCase.Result result = service.issuePartUploadUrls(issueCmd(1));
 
@@ -94,7 +94,7 @@ class CaptureUploadServiceTest {
     @DisplayName("presign: 녹음자가 살아있으면 다른 사람의 이어받기를 CAP-004로 거절한다")
     void issue_rejectsTakeoverWhenRecorderAlive() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, 99L);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         assertErrorCode(() -> service.issuePartUploadUrls(issueCmd(1)), "CAP-004");
     }
@@ -104,7 +104,7 @@ class CaptureUploadServiceTest {
     @DisplayName("presign: 녹음자가 끊겼으면 다른 참석자가 이어받고 세그먼트가 올라간다")
     void issue_allowsTakeoverWhenRecorderDead() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, 99L);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, false);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, false, true);
 
         IssuePartUploadUrlsUseCase.Result result = service.issuePartUploadUrls(issueCmd(1));
 
@@ -117,7 +117,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("complete: 회의가 없으면 CAP-002로 거절한다")
     void complete_rejectsWhenMeetingMissing() {
-        CaptureUploadService service = service(Optional.empty(), true, null, true);
+        CaptureUploadService service = service(Optional.empty(), true, null, true, true);
 
         assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm"))),
                 "CAP-002");
@@ -128,7 +128,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("complete: 참석자가 아니면 CAP-010으로 거절한다")
     void complete_rejectsNonAttendee() {
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), false, null, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), false, null, true, true);
 
         assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm"))),
                 "CAP-010");
@@ -138,7 +138,7 @@ class CaptureUploadServiceTest {
     @Test
     @DisplayName("complete: presign 이력이 없으면 CAP-004로 거절한다")
     void complete_rejectsWhenStateMissing() {
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, null, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, null, true, true);
 
         assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm"))),
                 "CAP-004");
@@ -150,7 +150,7 @@ class CaptureUploadServiceTest {
     @DisplayName("complete: 현재 녹음자가 아니면 CAP-004로 거절한다")
     void complete_rejectsNonRecorder() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, 99L);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm"))),
                 "CAP-004");
@@ -162,7 +162,7 @@ class CaptureUploadServiceTest {
     @DisplayName("complete: segmentSeq가 서버 상태와 다르면 CAP-009로 거절한다")
     void complete_rejectsSegmentMismatch() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, CALLER_ID);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         assertErrorCode(() -> service.completePartUpload(completeCmd(1, 1, expectedKey(1, 1, "webm"))),
                 "CAP-009");
@@ -174,10 +174,23 @@ class CaptureUploadServiceTest {
     @DisplayName("complete: s3Key가 서버 재구성 값과 다르면 CAP-009로 거절한다")
     void complete_rejectsKeyMismatch() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, CALLER_ID);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         String tamperedKey = "stt-temp/org-999/meeting-999/segments/0/parts/0001.webm";
         assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, tamperedKey)), "CAP-009");
+        assertThat(savedParts).isEmpty();
+    }
+
+    /* S3에 실제로 그 크기로 업로드된 게 없으면(HEAD 불일치) CAP-019로 거절되는지 검증한다(#155 —
+       클라이언트가 업로드도 안 하고 완료를 통보하는 것을 막는다). */
+    @Test
+    @DisplayName("complete: S3에 실제 업로드가 확인 안 되면 CAP-019로 거절한다")
+    void complete_rejectsWhenObjectNotUploaded() {
+        CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, CALLER_ID);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, false);
+
+        assertErrorCode(() -> service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm"))),
+                "CAP-019");
         assertThat(savedParts).isEmpty();
     }
 
@@ -186,7 +199,7 @@ class CaptureUploadServiceTest {
     @DisplayName("complete: 정상 통보면 청크를 저장하고 상태·하트비트를 갱신한다")
     void complete_savesChunkAndRefreshesState() {
         CaptureUploadState existing = CaptureUploadState.startWithRecorder(MEETING_ID, CALLER_ID);
-        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true);
+        CaptureUploadService service = service(Optional.of(COMPANY_ID), true, existing, true, true);
 
         service.completePartUpload(completeCmd(0, 1, expectedKey(0, 1, "webm")));
 
@@ -214,10 +227,10 @@ class CaptureUploadServiceTest {
         return new CompletePartUploadCommand(MEETING_ID, CALLER_ID, segmentSeq, seq, s3Key, 1_000_000L);
     }
 
-    // 회의 존재/참석 여부·기존 상태·녹음자 하트비트 생존 여부를 지정해 서비스를 조립한다.
-    // 회의는 회사 1 소속으로 고정. state가 null이면 "presign 이력 없음"을 뜻한다.
+    // 회의 존재/참석 여부·기존 상태·녹음자 하트비트 생존 여부·S3 objectMatches 결과를 지정해
+    // 서비스를 조립한다. 회의는 회사 1 소속으로 고정. state가 null이면 "presign 이력 없음"을 뜻한다.
     private CaptureUploadService service(Optional<Long> companyId, boolean attendee, CaptureUploadState state,
-                                         boolean recorderAlive) {
+                                         boolean recorderAlive, boolean objectMatches) {
         savedParts.clear();
         heartbeatRefreshed[0] = false;
 
@@ -297,6 +310,11 @@ class CaptureUploadServiceTest {
             public void deleteRecording(String s3Key) {
                 throw new AssertionError("presign/complete 경로에서 삭제는 호출되면 안 됩니다.");
             }
+
+            @Override
+            public boolean objectMatches(String s3Key, long expectedSizeBytes) {
+                return objectMatches;
+            }
         };
         CaptureHeartbeatPort heartbeat = new CaptureHeartbeatPort() {
             @Override
@@ -309,7 +327,8 @@ class CaptureUploadServiceTest {
                 return recorderAlive;
             }
         };
-        return new CaptureUploadService(meetingRef, accessGuard, stateRepo, partRepo, storage, heartbeat);
+        CompletePartUploadWriter writer = new CompletePartUploadWriter(partRepo, stateRepo, heartbeat);
+        return new CaptureUploadService(meetingRef, accessGuard, stateRepo, storage, heartbeat, writer);
     }
 
     private void assertErrorCode(Runnable execution, String expectedCode) {

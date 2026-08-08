@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component;
 import com.module06.backend.cap.application.port.out.CapObjectStoragePort;
 
 /* comment.
-    CapObjectStoragePort 임시 구현체(project의 ProjectAttachmentStorageStubAdapter와 동일 패턴).
-    본인(김현지)이 실제 S3 어댑터를 낼 때까지 개발용으로 쓴다 — @Profile("!prod")로 운영에서만
-    확실히 안 뜨게 막는다. 실제 파일 업로드 없음: 가짜 URL 문자열만 돌려준다.
+    CapObjectStoragePort 개발용 구현체(project의 ProjectAttachmentStorageStubAdapter와 동일 패턴).
+    운영은 CapS3ObjectStorageAdapter(#155)가 대신하므로 @Profile("!prod")로 운영에서만 확실히
+    안 뜨게 막는다. 실제 파일 업로드 없음: 가짜 URL 문자열만 돌려준다.
 */
 @Component
 @Profile("!prod")
@@ -26,7 +26,7 @@ public class CapObjectStorageStubAdapter implements CapObjectStoragePort {
         return new IssuedPartUploadUrl("https://stub-storage.local/upload/" + s3Key, EXPIRES_IN_SECONDS);
     }
 
-    // 재생용 presigned GET도 가짜 URL만 돌려줌(실 S3 어댑터에서 Range 지원 GET 서명으로 대체).
+    // 재생용 presigned GET도 가짜 URL만 돌려줌(운영은 CapS3ObjectStorageAdapter가 실제 GET 서명 발급).
     @Override
     public IssuedPlaybackUrl issuePlaybackUrl(String s3Key) {
         return new IssuedPlaybackUrl("https://stub-storage.local/playback/" + s3Key, PLAYBACK_EXPIRES_IN_SECONDS);
@@ -36,5 +36,11 @@ public class CapObjectStorageStubAdapter implements CapObjectStoragePort {
     @Override
     public void deleteRecording(String s3Key) {
         log.info("녹음 삭제(stub) — s3Key={}. 실제 S3 DeleteObject는 후속 어댑터에서 수행.", s3Key);
+    }
+
+    // 실제 업로드가 없으니 검증할 것도 없다 — 항상 통과시켜 로컬 개발 흐름을 막지 않는다.
+    @Override
+    public boolean objectMatches(String s3Key, long expectedSizeBytes) {
+        return true;
     }
 }

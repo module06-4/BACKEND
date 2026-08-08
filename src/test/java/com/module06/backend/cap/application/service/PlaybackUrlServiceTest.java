@@ -222,6 +222,11 @@ class PlaybackUrlServiceTest {
             @Override
             public void deleteRecording(String s3Key) {
             }
+
+            @Override
+            public boolean objectMatches(String s3Key, long expectedSizeBytes) {
+                throw new AssertionError("재생 경로에서 objectMatches는 호출되면 안 됩니다.");
+            }
         };
         return new PlaybackUrlService(accessGuard, recordingRepo, storage);
     }

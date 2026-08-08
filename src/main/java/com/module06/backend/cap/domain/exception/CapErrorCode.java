@@ -17,6 +17,7 @@ public enum CapErrorCode implements ErrorCode {
     CAP_PART_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "CAP-009", "청크 경로가 서버가 발급한 값과 일치하지 않습니다."),
     CAP_INVALID_SEQ(HttpStatus.BAD_REQUEST, "CAP-011", "청크 순번이 올바르지 않습니다."),
     CAP_RECORDING_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "CAP-015", "녹음 파일 경로가 올바르지 않습니다."),
+    CAP_PART_NOT_UPLOADED(HttpStatus.BAD_REQUEST, "CAP-019", "청크가 실제로 업로드되지 않았거나 크기가 일치하지 않습니다."),
 
     CAP_MEETING_NOT_FOUND(HttpStatus.NOT_FOUND, "CAP-002", "회의를 찾을 수 없습니다."),
     CAP_RECORDING_NOT_FOUND(HttpStatus.NOT_FOUND, "CAP-016", "녹음 파일이 존재하지 않습니다."),
