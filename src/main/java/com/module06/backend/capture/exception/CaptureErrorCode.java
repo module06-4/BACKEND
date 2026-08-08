@@ -193,7 +193,20 @@ public enum CaptureErrorCode implements ErrorCode {
      * 사람이 버튼을 눌러도 아무것도 나아지지 않는 상태가 반복된다.
      */
     STT_BLOCK_AUDIO_MISSING(HttpStatus.CONFLICT, "MEETING_409_9",
-            "블록 오디오가 없어 다시 처리할 수 없습니다.");
+            "블록 오디오가 없어 다시 처리할 수 없습니다."),
+
+    /*
+     * STT-02 — 어휘에 넣을 단어가 하나도 없다.
+     *
+     * 그대로 만들면 **빈 어휘 리소스가 계정 상한을 하나 차지한다.** 인식률은 그대로인데 다른
+     * 회의가 쓸 자리만 줄고, 그 사실은 나중에 "왜 이 회의만 어휘가 없지"로 드러난다 —
+     * 원인에서 한참 떨어진 자리다.
+     *
+     * 409 인 이유 — 요청이 잘못된 것이 아니라 **지금 이 회의의 상태로는 만들 것이 없다.**
+     * 참석자를 넣고 다시 누르면 같은 요청이 성립한다.
+     */
+    VOCABULARY_NO_PHRASES(HttpStatus.CONFLICT, "MEETING_409_10",
+            "어휘에 넣을 참석자 정보가 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
