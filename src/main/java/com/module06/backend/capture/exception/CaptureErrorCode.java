@@ -193,7 +193,52 @@ public enum CaptureErrorCode implements ErrorCode {
      * 사람이 버튼을 눌러도 아무것도 나아지지 않는 상태가 반복된다.
      */
     STT_BLOCK_AUDIO_MISSING(HttpStatus.CONFLICT, "MEETING_409_9",
-            "블록 오디오가 없어 다시 처리할 수 없습니다.");
+            "블록 오디오가 없어 다시 처리할 수 없습니다."),
+
+    /*
+     * QLTY-01 — 같은 버전을 동시에 등록했다(UNIQUE(meeting_id, version) 충돌).
+     *
+     * 재시도해 다음 버전을 만들지 않는다. 먼저 얼린 쪽이 이 회의의 그 버전이고, 이쪽이 또
+     * 만들면 **같은 라벨의 정답지가 두 벌** 생겨 어느 것으로 잰 수치인지 알 수 없게 된다.
+     */
+    GOLD_SET_ALREADY_FROZEN(HttpStatus.CONFLICT, "MEETING_409_6", "이미 동결된 gold set 입니다."),
+
+    /*
+     * QLTY-01 — 검토가 끝나지 않은 회의를 정답지로 얼리려 했다.
+     *
+     * PENDING 인 액션은 **AI 가 낸 값 그대로**다. 함께 얼리면 모델의 출력이 정답지에 들어가
+     * **자기 자신을 채점하게 된다** — precision 이 실제보다 높게 나오고, 그 숫자로 프롬프트
+     * 개선을 판단하게 된다. 측정 장치가 측정 대상을 베끼는 셈이다.
+     */
+    GOLD_SET_NOT_FULLY_REVIEWED(HttpStatus.CONFLICT, "MEETING_409_11",
+            "검토가 끝나지 않은 회의는 정답지로 동결할 수 없습니다."),
+
+    /*
+     * QLTY-01 — 얼릴 액션이 하나도 없다.
+     *
+     * 빈 정답지는 precision 의 분모를 0 으로 만들어 지표를 못 낸다. 그런데도 동결은 되므로,
+     * 막지 않으면 "정답지 8건" 안에 아무 내용 없는 행이 섞인다.
+     */
+    GOLD_SET_NO_ACTIONS(HttpStatus.CONFLICT, "MEETING_409_12", "정답지로 얼릴 액션이 없습니다."),
+
+    /*
+     * QLTY-01 — 정답 라벨을 JSON 으로 만들지 못했다.
+     *
+     * 여기서 빈 값으로 대체하지 않는다. 라벨이 깨진 정답지는 **정답지가 아니고**, 빈 배열로
+     * 얼리면 그걸로 잰 precision 이 조용히 0 이 된다. 동결은 되돌릴 수 없으므로 차라리 실패한다.
+     */
+    GOLD_SET_LABEL_SERIALIZATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "MEETING_500_1",
+            "정답 라벨을 저장할 수 없습니다."),
+
+    /*
+     * QLTY-03 — period 형식이 YYYY-MM 이 아니다.
+     *
+     * **이번 달로 대신 답하지 않는다.** 사람은 지난달 비용을 물었는데 이번 달 숫자를 받으면,
+     * 그게 어느 달인지 모른 채로 비용을 판단하게 된다 — 이 API 는 특화 모델 전환의 손익분기점을
+     * 계산하는 근거라 달이 어긋나면 결론이 통째로 바뀐다.
+     */
+    QUALITY_PERIOD_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "MEETING_422_8",
+            "기간 형식이 올바르지 않습니다(YYYY-MM).");
 
     private final HttpStatus httpStatus;
     private final String code;
