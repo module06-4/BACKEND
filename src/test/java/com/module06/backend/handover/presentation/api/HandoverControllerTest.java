@@ -7,12 +7,15 @@ import com.module06.backend.handover.application.port.out.OrgQueryPort;
 import com.module06.backend.handover.application.usecase.CompleteHandoverUseCase;
 import com.module06.backend.handover.application.usecase.CreateHandoverUseCase;
 import com.module06.backend.handover.application.usecase.FinalizeHandoverUseCase;
+import com.module06.backend.handover.application.usecase.GetHandoverInsightsUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverListUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverPackageUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverUseCase;
 import com.module06.backend.handover.application.usecase.ReassignHandoverItemUseCase;
 import com.module06.backend.handover.application.usecase.RejectHandoverUseCase;
 import com.module06.backend.handover.domain.model.Handover;
+import com.module06.backend.handover.domain.model.HandoverInsight;
+import com.module06.backend.handover.domain.model.HandoverInsightKind;
 import com.module06.backend.handover.domain.model.HandoverItem;
 import com.module06.backend.handover.domain.model.HandoverStatus;
 import com.module06.backend.handover.domain.model.HandoverType;
@@ -85,6 +88,9 @@ class HandoverControllerTest {
 
     @MockitoBean
     private GetHandoverPackageUseCase getHandoverPackageUseCase;
+
+    @MockitoBean
+    private GetHandoverInsightsUseCase getHandoverInsightsUseCase;
 
     @MockitoBean
     private OrgQueryPort orgQueryPort;
@@ -380,6 +386,52 @@ class HandoverControllerTest {
         verify(getHandoverPackageUseCase).getPackage(eq(HANDOVER_ID), any(LocalDate.class));
     }
 
+    @Test
+    void getInsightsReturnsGroupedInsightsForId() throws Exception {
+        authenticateAs(WRITER, COMPANY, "MEMBER", false, TEAM);
+        when(getHandoverUseCase.get(HANDOVER_ID)).thenReturn(submitted());
+        when(getHandoverInsightsUseCase.getInsights(HANDOVER_ID)).thenReturn(List.of(
+                insight(1L, HandoverInsightKind.OWNERSHIP, 1),
+                insight(2L, HandoverInsightKind.ORPHAN_ALERT, 2),
+                insight(3L, HandoverInsightKind.ASK_WHOM, 3),
+                insight(4L, HandoverInsightKind.CONTEXT_TIMELINE, 4)
+        ));
+
+        mockMvc.perform(get("/api/handovers/{id}/insights", HANDOVER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ownership[0].kind").value("OWNERSHIP"))
+                .andExpect(jsonPath("$.data.ownership[0].payload").value("{\"rank\":1}"))
+                .andExpect(jsonPath("$.data.orphanAlert[0].kind").value("ORPHAN_ALERT"))
+                .andExpect(jsonPath("$.data.askWhom[0].kind").value("ASK_WHOM"))
+                .andExpect(jsonPath("$.data.contextTimeline[0].kind").value("CONTEXT_TIMELINE"));
+
+        verify(getHandoverInsightsUseCase).getInsights(HANDOVER_ID);
+    }
+
+    @Test
+    void getInsightsDeniesMemberReadingAnotherWriterHandover() throws Exception {
+        authenticateAs(999L, COMPANY, "MEMBER", false, TEAM);
+        when(getHandoverUseCase.get(HANDOVER_ID)).thenReturn(submitted());
+
+        mockMvc.perform(get("/api/handovers/{id}/insights", HANDOVER_ID))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("HO-026"));
+    }
+
+    @Test
+    void getInsightsReturnsEmptyGroupedResponse() throws Exception {
+        authenticateAs(WRITER, COMPANY, "MEMBER", false, TEAM);
+        when(getHandoverUseCase.get(HANDOVER_ID)).thenReturn(submitted());
+        when(getHandoverInsightsUseCase.getInsights(HANDOVER_ID)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/handovers/{id}/insights", HANDOVER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ownership").isEmpty())
+                .andExpect(jsonPath("$.data.orphanAlert").isEmpty())
+                .andExpect(jsonPath("$.data.askWhom").isEmpty())
+                .andExpect(jsonPath("$.data.contextTimeline").isEmpty());
+    }
+
     private static GetHandoverPackageUseCase.HandoverPackage handoverPackage() {
         GetHandoverPackageUseCase.Item item = new GetHandoverPackageUseCase.Item(
                 ACTION, "Action", "TODO", LocalDate.of(2026, 8, 30), LocalDate.of(2026, 7, 20), "PRJ", "Meeting");
@@ -392,6 +444,11 @@ class HandoverControllerTest {
                 List.of(new GetHandoverPackageUseCase.MeetingHistory(
                         500L, LocalDate.of(2026, 8, 1), List.of("Kim"), "decision", "actions")),
                 List.of(new GetHandoverPackageUseCase.ReassigneeGroup(null, "미배정", List.of(item))));
+    }
+
+    private static HandoverInsight insight(Long id, HandoverInsightKind kind, int sortOrder) {
+        return HandoverInsight.restore(id, HANDOVER_ID, ACTION, kind, "{\"rank\":" + sortOrder + "}", sortOrder,
+                LocalDateTime.of(2026, 8, 1, 9, 0), LocalDateTime.of(2026, 8, 1, 9, 0));
     }
 
     private static GetHandoverListUseCase.HandoverSummary summary() {

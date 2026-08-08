@@ -21,4 +21,11 @@ public class HandoverInsightPersistenceAdapter implements HandoverInsightPort {
             .map(HandoverInsightJpaEntity::from)
             .toList());
     }
+
+    @Override
+    public List<HandoverInsight> findByHandoverId(Long handoverId) {
+        return repository.findByHandoverIdOrderByKindAscSortOrderAscIdAsc(handoverId).stream()
+            .map(HandoverInsightJpaEntity::toDomain)
+            .toList();
+    }
 }

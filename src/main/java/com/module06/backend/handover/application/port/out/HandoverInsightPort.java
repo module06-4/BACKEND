@@ -12,4 +12,6 @@ import java.util.List;
 public interface HandoverInsightPort {
 
     void replaceAllForHandover(Long handoverId, List<HandoverInsight> insights);
+
+    List<HandoverInsight> findByHandoverId(Long handoverId);
 }

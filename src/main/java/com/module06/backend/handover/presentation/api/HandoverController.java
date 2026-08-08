@@ -7,6 +7,7 @@ import com.module06.backend.handover.application.port.out.OrgQueryPort;
 import com.module06.backend.handover.application.usecase.CompleteHandoverUseCase;
 import com.module06.backend.handover.application.usecase.CreateHandoverUseCase;
 import com.module06.backend.handover.application.usecase.FinalizeHandoverUseCase;
+import com.module06.backend.handover.application.usecase.GetHandoverInsightsUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverListUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverPackageUseCase;
 import com.module06.backend.handover.application.usecase.GetHandoverUseCase;
@@ -18,6 +19,7 @@ import com.module06.backend.handover.domain.model.HandoverStatus;
 import com.module06.backend.handover.presentation.api.dto.request.CreateHandoverRequest;
 import com.module06.backend.handover.presentation.api.dto.request.ReassignItemRequest;
 import com.module06.backend.handover.presentation.api.dto.request.RejectHandoverRequest;
+import com.module06.backend.handover.presentation.api.dto.response.HandoverInsightResponse;
 import com.module06.backend.handover.presentation.api.dto.response.HandoverPackageResponse;
 import com.module06.backend.handover.presentation.api.dto.response.HandoverResponse;
 import com.module06.backend.handover.presentation.api.dto.response.HandoverSummaryResponse;
@@ -52,6 +54,7 @@ public class HandoverController {
     private final GetHandoverListUseCase getHandoverListUseCase;
     private final GetHandoverUseCase getHandoverUseCase;
     private final GetHandoverPackageUseCase getHandoverPackageUseCase;
+    private final GetHandoverInsightsUseCase getHandoverInsightsUseCase;
     private final OrgQueryPort orgQueryPort;
 
     public HandoverController(CreateHandoverUseCase createHandoverUseCase,
@@ -62,6 +65,7 @@ public class HandoverController {
                               GetHandoverListUseCase getHandoverListUseCase,
                               GetHandoverUseCase getHandoverUseCase,
                               GetHandoverPackageUseCase getHandoverPackageUseCase,
+                              GetHandoverInsightsUseCase getHandoverInsightsUseCase,
                               OrgQueryPort orgQueryPort) {
         this.createHandoverUseCase = createHandoverUseCase;
         this.reassignHandoverItemUseCase = reassignHandoverItemUseCase;
@@ -71,6 +75,7 @@ public class HandoverController {
         this.getHandoverListUseCase = getHandoverListUseCase;
         this.getHandoverUseCase = getHandoverUseCase;
         this.getHandoverPackageUseCase = getHandoverPackageUseCase;
+        this.getHandoverInsightsUseCase = getHandoverInsightsUseCase;
         this.orgQueryPort = orgQueryPort;
     }
 
@@ -125,6 +130,16 @@ public class HandoverController {
         assertCanRead(getHandoverUseCase.get(id), principal);
         GetHandoverPackageUseCase.HandoverPackage pkg = getHandoverPackageUseCase.getPackage(id, LocalDate.now());
         return ApiResponse.success("인수인계 상세 패키지를 조회했습니다.", HandoverPackageResponse.from(pkg));
+    }
+
+    @GetMapping("/{id}/insights")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<HandoverInsightResponse> getInsights(@PathVariable Long id,
+                                                            @Parameter(hidden = true)
+                                                            @AuthenticationPrincipal AuthPrincipal principal) {
+        assertCanRead(getHandoverUseCase.get(id), principal);
+        return ApiResponse.success("인수인계 인사이트를 조회했습니다.",
+                HandoverInsightResponse.from(getHandoverInsightsUseCase.getInsights(id)));
     }
 
     // 신청자·팀은 본문이 아니라 토큰에서 — 남의 명의로 대신 신청하는 것을 원천 차단.
