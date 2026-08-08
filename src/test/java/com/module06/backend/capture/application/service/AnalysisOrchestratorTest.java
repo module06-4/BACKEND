@@ -52,6 +52,8 @@ import com.module06.backend.capture.domain.model.ResolvedReference;
 import com.module06.backend.capture.domain.model.TopicSegment;
 import com.module06.backend.capture.domain.model.Utterance;
 import com.module06.backend.capture.domain.model.VerifyVerdict;
+import com.module06.backend.metering.application.command.RecordTokenUsageCommand;
+import com.module06.backend.metering.application.port.in.RecordTokenUsagePort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,6 +72,7 @@ class AnalysisOrchestratorTest {
     private static final long COMPANY = 7L;
     private static final long MEETING = 500L;
     private static final long PROJECT = 31L;
+    private static final long TEAM = 3L;
     private static final LocalDate MEETING_DATE = LocalDate.of(2026, 8, 5);
 
     private static final List<AiLayerPort.Participant> PARTICIPANTS = List.of(
@@ -800,7 +803,7 @@ class AnalysisOrchestratorTest {
                 new TupleDistributionService(tuples, actions, meetingId -> Optional.of(PROJECT),
                         // 이 회의에는 이미 분석 경로로 만든 액션이 있다.
                         (companyId, meetingId) -> true, new ObjectMapper()),
-                ai, command -> {})
+                ai, command -> {}, meetingId -> Optional.empty())
                 .run(TENANT, COMPANY, MEETING, PARTICIPANTS, false);
 
         // 분석은 실패가 아니다. 액션만 만들지 않는다 — 지우는 쪽이 아니라 멈추는 쪽이 안전하다.
@@ -832,7 +835,7 @@ class AnalysisOrchestratorTest {
                         // 것이다 — 분배할 것이 없는 정상 상태가 아니라 데이터 오류다.
                         meetingId -> Optional.empty(),
                         (companyId, meetingId) -> false, new ObjectMapper()),
-                ai, command -> {})
+                ai, command -> {}, meetingId -> Optional.empty())
                 .run(TENANT, COMPANY, MEETING, PARTICIPANTS, false);
 
         /*
@@ -955,6 +958,52 @@ class AnalysisOrchestratorTest {
                 LayerName.L4, LayerName.L5, LayerName.L6, LayerName.L7, LayerName.DIST);
     }
 
+    // ── 미터링 배선 (teamId) ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("분석 성공 시 회의 teamId 를 미터링 원장에 실어 기록한다")
+    void 미터링_원장에_회의_teamId를_싣는다() {
+        FakeSummaryRepository summaries = new FakeSummaryRepository();
+        RecordingAiLayerPort ai = new RecordingAiLayerPort(
+                List.of(item(ItemType.DECISION, "로드맵 확정", 1L)),
+                decisionIds -> List.of(new GateVerdict(decisionIds.get(0), GateStatus.CONFIRMED, "합의됨")));
+        ai.tuples = List.of(
+                new AssignmentTuple("로드맵 초안 작성", 42L, AssigneeSource.EXPLICIT_CALL, null, 1L));
+        FakeTupleRepository tuples = new FakeTupleRepository();
+        RecordingTokenUsagePort metering = new RecordingTokenUsagePort();
+
+        meteringOrchestrator(summaries, tuples, ai, metering, meetingId -> Optional.of(TEAM))
+                .run(TENANT, COMPANY, MEETING, PARTICIPANTS, false);
+
+        // LLM 계층이 돌았으니 원장에 1회 기록된다.
+        assertThat(metering.commands).hasSize(1);
+        RecordTokenUsageCommand recorded = metering.commands.get(0);
+        // 회의 teamId 가 그대로 실린다 — null 로 두면 대시보드 부서 breakdown 이 영영 안 잡힌다.
+        assertThat(recorded.teamId()).isEqualTo(TEAM);
+        assertThat(recorded.companyId()).isEqualTo(COMPANY);
+        assertThat(recorded.meetingId()).isEqualTo(MEETING);
+    }
+
+    @Test
+    @DisplayName("teamId 가 없는(OWNER 개설) 회의는 회사 단위로만 기록한다 — teamId=null")
+    void teamId가_없으면_회사_단위로_기록한다() {
+        FakeSummaryRepository summaries = new FakeSummaryRepository();
+        RecordingAiLayerPort ai = new RecordingAiLayerPort(
+                List.of(item(ItemType.DECISION, "로드맵 확정", 1L)),
+                decisionIds -> List.of(new GateVerdict(decisionIds.get(0), GateStatus.CONFIRMED, "합의됨")));
+        ai.tuples = List.of(
+                new AssignmentTuple("로드맵 초안 작성", 42L, AssigneeSource.EXPLICIT_CALL, null, 1L));
+        FakeTupleRepository tuples = new FakeTupleRepository();
+        RecordingTokenUsagePort metering = new RecordingTokenUsagePort();
+
+        // team_id 가 NULL 이거나 회의 행을 못 읽으면 Optional.empty() — 둘 다 회사 단위 경로다.
+        meteringOrchestrator(summaries, tuples, ai, metering, meetingId -> Optional.empty())
+                .run(TENANT, COMPANY, MEETING, PARTICIPANTS, false);
+
+        assertThat(metering.commands).hasSize(1);
+        assertThat(metering.commands.get(0).teamId()).isNull();
+    }
+
     // ── 조립 ────────────────────────────────────────────────────────────────────
 
     private AnalysisOrchestrator orchestrator(FakeSummaryRepository summaries,
@@ -1017,7 +1066,24 @@ class AnalysisOrchestratorTest {
                 new TupleDistributionService(tuples, actions,
                         meetingId -> Optional.of(PROJECT), (companyId, meetingId) -> false,
                         new ObjectMapper()),
-                ai, command -> {});
+                ai, command -> {}, meetingId -> Optional.empty());
+    }
+
+    /* 미터링 원장에 무엇이 실리는지 검증하는 조립 — 기록 포트와 teamId 프로바이더를 주입한다. */
+    private static AnalysisOrchestrator meteringOrchestrator(FakeSummaryRepository summaries,
+                                                             FakeTupleRepository tuples,
+                                                             RecordingAiLayerPort ai,
+                                                             RecordTokenUsagePort metering,
+                                                             MeetingTeamProvider teams) {
+        return new AnalysisOrchestrator(
+                new FakeTranscriptRepository(utterances()), new FakeCaptionRepository(),
+                new FakeLayerRepository(), new FakeRunRepository(), summaries, tuples,
+                meetingId -> Optional.of(MEETING_DATE),
+                new SpeakerAttributionResolver(), new ConflictDetector(), new AutoConfirmGate(),
+                new TupleDistributionService(tuples, new RecordingDistributionPort(),
+                        meetingId -> Optional.of(PROJECT), (companyId, meetingId) -> false,
+                        new ObjectMapper()),
+                ai, metering, teams);
     }
 
     private static List<Utterance> utterances() {
@@ -1403,6 +1469,17 @@ class AnalysisOrchestratorTest {
             return command.items().stream()
                     .map(item -> new DistributedAction(nextActionId++, item))
                     .toList();
+        }
+    }
+
+    /* 미터링 원장에 실린 커맨드를 붙잡아 두는 기록 포트. 무엇을 기록하는지가 검증 대상이다. */
+    private static final class RecordingTokenUsagePort implements RecordTokenUsagePort {
+
+        private final List<RecordTokenUsageCommand> commands = new ArrayList<>();
+
+        @Override
+        public void record(RecordTokenUsageCommand command) {
+            commands.add(command);
         }
     }
 

@@ -150,6 +150,8 @@ public class AnalysisOrchestrator {
     private final AiLayerPort aiLayerPort;
     // A→미터링 인바운드 포트. 분석이 끝까지 성공하면 이 실행의 토큰 사용량을 원장에 1회 기록한다(usage-based 과금).
     private final RecordTokenUsagePort recordTokenUsagePort;
+    // 회의 소속 팀 조회. 미터링 원장에 teamId 를 실어 부서 단위 집계를 가능하게 한다(없으면 회사 단위로만 기록).
+    private final MeetingTeamProvider meetingTeamProvider;
 
     /*
      * 회의 하나를 분석한다.
@@ -668,7 +670,9 @@ public class AnalysisOrchestrator {
      * model 은 이 실행에서 실제로 부른 LLM 계층의 모델명(원가 계수용)이다. 코드 계층(L1·L6·L7·DIST)은
      * 토큰 0·모델 없음이라 건너뛴다. LLM 계층이 하나도 안 돌았으면 기록할 원가 축이 없어 생략한다.
      *
-     * teamId 는 아직 null 이다 — 부서별 집계는 회의 teamId 배선(후속) 후. 회사 단위 실측은 지금 동작한다.
+     * teamId 는 회의 소속 팀이다(meetingTeamProvider). meeting.team_id 가 NULL 인 OWNER 개설
+     * 회의나 회의 행을 못 읽은 경우엔 null 로 남아 회사 단위로만 집계된다 — 부서 breakdown 없이
+     * 회사 실측만 남는 정상 경로다. 조회 자체도 best-effort 다(try 안에서 함께 삼킨다).
      *
      * ⚠ 기록 실패로 분석을 실패시키지 않는다. 분석은 이미 완료됐고 토큰도 이미 썼다 — 예외를 올리면
      * 완료된 회의가 FAILED 로 뒤집혀 ANLZ-02 가 재분석하고, 그게 진짜 이중과금이다. 미터링 누락은
@@ -693,8 +697,11 @@ public class AnalysisOrchestrator {
         }
         String jobId = "meeting-" + meetingId + "-run-" + runSeq;
         try {
+            // teamId 조회도 try 안에 둔다 — 실패해도 분석은 이미 완료됐고, 여기서 예외를 올리면
+            // 완료된 회의가 FAILED 로 뒤집혀 재분석·이중과금이 된다(아래 catch 와 같은 이유).
+            Long teamId = meetingTeamProvider.teamIdOf(meetingId).orElse(null);
             recordTokenUsagePort.record(new RecordTokenUsageCommand(
-                    companyId, null, meetingId, jobId,
+                    companyId, teamId, meetingId, jobId,
                     total.tokensIn(), total.tokensOut(), model));
         } catch (RuntimeException e) {
             log.error("토큰 미터링 기록 실패 — 분석은 완료됨, 원장만 누락. meetingId={} runSeq={} jobId={}",
